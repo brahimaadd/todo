@@ -1,0 +1,73 @@
+-- Script d'initialisation de la base de données (init_db.sql)
+-- À exécuter une fois avant de lancer l'application
+
+-- 1. Création de la base de données (à exécuter en tant que super-admin)
+CREATE DATABASE todo_app_db
+    WITH 
+    OWNER = postgres
+    ENCODING = 'UTF8'
+    LC_COLLATE = 'fr_FR.UTF-8'
+    LC_CTYPE = 'fr_FR.UTF-8'
+    CONNECTION LIMIT = -1;
+
+-- 2. Connexion à la nouvelle base (exécuter séparément si nécessaire)
+\c todo_app_db
+
+-- 3. Création du schéma dédié
+CREATE SCHEMA todo_app
+    AUTHORIZATION postgres;
+
+-- 4. Création de la table principale
+CREATE TABLE todo_app.tasks (
+    task_id SERIAL PRIMARY KEY,
+    description TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    due_date DATE,
+    priority SMALLINT CHECK (priority BETWEEN 1 AND 3),
+    is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+    completed_at TIMESTAMPTZ
+);
+
+-- 5. Création d'un index pour les recherches fréquentes
+CREATE INDEX idx_tasks_completion ON todo_app.tasks(is_completed);
+CREATE INDEX idx_tasks_priority ON todo_app.tasks(priority);
+
+-- 6. Création d'un utilisateur dédié (meilleure pratique de sécurité)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'todo_app_user') THEN
+        CREATE ROLE todo_app_user WITH LOGIN PASSWORD 'UnMotDePasseComplexe123!';
+    END IF;
+END
+$$;
+
+-- 7. Attribution des permissions
+GRANT CONNECT ON DATABASE todo_app_db TO todo_app_user;
+GRANT USAGE ON SCHEMA todo_app TO todo_app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA todo_app TO todo_app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA todo_app TO todo_app_user;
+
+-- 8. Création d'une vue utile
+CREATE OR REPLACE VIEW todo_app.pending_tasks AS
+SELECT task_id, description, due_date, priority
+FROM todo_app.tasks
+WHERE is_completed = FALSE
+ORDER BY priority, created_at;
+
+-- 9. Fonction pour compléter une tâche
+CREATE OR REPLACE FUNCTION todo_app.complete_task(task_id INT)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE todo_app.tasks
+    SET is_completed = TRUE,
+        completed_at = NOW()
+    WHERE task_id = complete_task.task_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 10. Exemple de données de test (optionnel)
+INSERT INTO todo_app.tasks (description, priority, due_date)
+VALUES 
+    ('Acheter du lait', 2, CURRENT_DATE + INTERVAL '1 day'),
+    ('Réparer le vélo', 1, CURRENT_DATE + INTERVAL '3 days'),
+    ('Appeler le médecin', 3, NULL);
